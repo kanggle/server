@@ -1,0 +1,277 @@
+output$case_evolution <- renderPlotly({
+  data <- data_evolution %>%
+    group_by(date, var) %>%
+    summarise(
+      "value" = sum(value, na.rm = T)
+    ) %>%
+    as.data.frame()
+
+  p <- plot_ly(
+    data,
+    x     = ~date,
+    y     = ~value,
+    name  = sapply(data$var, capFirst),
+    color = ~var,
+    type  = 'scatter',
+    mode  = 'lines') %>%
+    layout(
+      yaxis = list(title = "# Cases"),
+      xaxis = list(title = "Date")
+    )
+
+
+  if (input$checkbox_logCaseEvolution) {
+    p <- layout(p, yaxis = list(type = "log"))
+  }
+
+  return(p)
+})
+
+output$selectize_casesByCountries <- renderUI({
+  selectizeInput(
+    "caseEvolution_country",
+    label    = "Select Countries",
+    choices  = unique(data_evolution$id),
+    selected = top5_countries,
+    multiple = TRUE
+  )
+})
+
+getDataByCountry <- function(countries, normalizeByPopulation) {
+  req(countries)
+  data_confirmed <- data_evolution %>%
+    select(id, date, var, value, Population) %>%
+    filter(id %in% countries &
+      var == "confirmed" &
+      value > 0) %>%
+    group_by(id, date, Population) %>%
+    summarise("Confirmed" = sum(value, na.rm = T)) %>%
+    arrange(date)
+  if (nrow(data_confirmed) > 0) {
+    data_confirmed <- data_confirmed %>%
+      mutate(Confirmed = if_else(normalizeByPopulation, round(Confirmed / Population * 100000, 2), Confirmed))
+  }
+  data_confirmed <- data_confirmed %>% as.data.frame()
+
+  data_recovered <- data_evolution %>%
+    select(id, date, var, value, Population) %>%
+    filter(id %in% countries &
+      var == "recovered" &
+      value > 0) %>%
+    group_by(id, date, Population) %>%
+    summarise("Estimated Recoveries" = sum(value, na.rm = T)) %>%
+    arrange(date)
+  if (nrow(data_recovered) > 0) {
+    data_recovered <- data_recovered %>%
+      mutate(`Estimated Recoveries` = if_else(normalizeByPopulation, round(`Estimated Recoveries` / Population * 100000, 2), `Estimated Recoveries`))
+  }
+  data_recovered <- data_recovered %>% as.data.frame()
+
+  data_deceased <- data_evolution %>%
+    select(id, date, var, value, Population) %>%
+    filter(id %in% countries &
+      var == "deceased" &
+      value > 0) %>%
+    group_by(id, date, Population) %>%
+    summarise("Deceased" = sum(value, na.rm = T)) %>%
+    arrange(date)
+  if (nrow(data_deceased) > 0) {
+    data_deceased <- data_deceased %>%
+      mutate(Deceased = if_else(normalizeByPopulation, round(Deceased / Population * 100000, 2), Deceased))
+  }
+  data_deceased <- data_deceased %>% as.data.frame()
+
+  return(list(
+    "confirmed" = data_confirmed,
+    "recovered" = data_recovered,
+    "deceased"  = data_deceased
+  ))
+}
+
+output$case_evolution_byCountry <- renderPlotly({
+  data <- getDataByCountry(input$caseEvolution_country, input$checkbox_per100kEvolutionCountry)
+
+  req(nrow(data$confirmed) > 0)
+  p <- plot_ly(data = data$confirmed, x = ~date, y = ~Confirmed, color = ~id, type = 'scatter', mode = 'lines',
+    legendgroup     = ~id) %>%
+    add_trace(data = data$recovered, x = ~date, y = ~`Estimated Recoveries`, color = ~id, line = list(dash = 'dash'),
+      legendgroup  = ~id, showlegend = FALSE) %>%
+    add_trace(data = data$deceased, x = ~date, y = ~Deceased, color = ~id, line = list(dash = 'dot'),
+      legendgroup  = ~id, showlegend = FALSE) %>%
+    add_trace(data = data$confirmed[which(data$confirmed$id == input$caseEvolution_country[1]),],
+      x            = ~date, y = -100, line = list(color = 'rgb(0, 0, 0)'), legendgroup = 'helper', name = "Confirmed") %>%
+    add_trace(data = data$confirmed[which(data$confirmed$id == input$caseEvolution_country[1]),],
+      x            = ~date, y = -100, line = list(color = 'rgb(0, 0, 0)', dash = 'dash'), legendgroup = 'helper', name = "Estimated Recoveries") %>%
+    add_trace(data = data$confirmed[which(data$confirmed$id == input$caseEvolution_country[1]),],
+      x            = ~date, y = -100, line = list(color = 'rgb(0, 0, 0)', dash = 'dot'), legendgroup = 'helper', name = "Deceased") %>%
+    layout(
+      yaxis = list(title = "# Cases", rangemode = "nonnegative"),
+      xaxis = list(title = "Date")
+    )
+
+  if (input$checkbox_logCaseEvolutionCountry) {
+    p <- layout(p, yaxis = list(type = "log"))
+  }
+  if (input$checkbox_per100kEvolutionCountry) {
+    p <- layout(p, yaxis = list(title = "# Cases per 100k Inhabitants"))
+  }
+
+  return(p)
+})
+
+output$selectize_casesByCountries_new <- renderUI({
+  selectizeInput(
+    "selectize_casesByCountries_new",
+    label    = "Select Country",
+    choices  = c("All", unique(data_evolution$id)),
+    selected = "All"
+  )
+})
+
+output$case_evolution_new <- renderPlotly({
+  req(input$selectize_casesByCountries_new)
+  data <- data_evolution %>%
+    mutate(var = sapply(var, capFirst)) %>%
+    filter(if (input$selectize_casesByCountries_new == "All") TRUE else id %in% input$selectize_casesByCountries_new) %>%
+    group_by(date, var, id) %>%
+    summarise(new_cases = sum(value_new, na.rm = T))
+
+  if (input$selectize_casesByCountries_new == "All") {
+    data <- data %>%
+      group_by(date, var) %>%
+      summarise(new_cases = sum(new_cases, na.rm = T))
+  }
+
+  p <- plot_ly(data = data, x = ~date, y = ~new_cases, color = ~var, type = 'bar') %>%
+    layout(
+      yaxis = list(title = "# New Cases"),
+      xaxis = list(title = "Date")
+    )
+})
+
+output$selectize_casesByCountriesAfter100th <- renderUI({
+  selectizeInput(
+    "caseEvolution_countryAfter100th",
+    label    = "Select Countries",
+    choices  = unique(data_evolution$id),
+    selected = top5_countries,
+    multiple = TRUE
+  )
+})
+
+output$selectize_casesSince100th <- renderUI({
+  selectizeInput(
+    "caseEvolution_var100th",
+    label    = "Select Variable",
+    choices  = list("Confirmed" = "confirmed", "Deceased" = "deceased"),
+    multiple = FALSE
+  )
+})
+
+output$case_evolution_after100 <- renderPlotly({
+  req(!is.null(input$checkbox_per100kEvolutionCountry100th), input$caseEvolution_var100th)
+  data <- data_evolution %>%
+    arrange(date) %>%
+    filter(if (input$caseEvolution_var100th == "confirmed") (value >= 100 & var == "confirmed") else (value >= 10 & var == "deceased")) %>%
+    group_by(id, Population, date) %>%
+    filter(if (is.null(input$caseEvolution_countryAfter100th)) TRUE else id %in% input$caseEvolution_countryAfter100th) %>%
+    summarise(value = sum(value, na.rm = T)) %>%
+    mutate("daysSince" = row_number()) %>%
+    ungroup()
+
+  if (input$checkbox_per100kEvolutionCountry100th) {
+    data$value <- data$value / data$Population * 100000
+  }
+
+  p <- plot_ly(data = data, x = ~daysSince, y = ~value, color = ~id, type = 'scatter', mode = 'lines')
+
+  if (input$caseEvolution_var100th == "confirmed") {
+    p <- layout(p,
+      yaxis = list(title = "# Confirmed cases"),
+      xaxis = list(title = "# Days since 100th confirmed case")
+    )
+  } else {
+    p <- layout(p,
+      yaxis = list(title = "# Deceased cases"),
+      xaxis = list(title = "# Days since 10th deceased case")
+    )
+  }
+  if (input$checkbox_logCaseEvolution100th) {
+    p <- layout(p, yaxis = list(type = "log"))
+  }
+  if (input$checkbox_per100kEvolutionCountry100th) {
+    p <- layout(p, yaxis = list(title = "# Cases per 100k Inhabitants"))
+  }
+
+  return(p)
+})
+
+output$box_caseEvolution <- renderUI({
+  tagList(
+    fluidRow(
+      box(
+        title = "Evolution of Cases since Outbreak",
+        plotlyOutput("case_evolution"),
+        column(
+          checkboxInput("checkbox_logCaseEvolution", label = "Logarithmic Y-Axis", value = FALSE),
+          width = 3,
+          style = "float: right; padding: 10px; margin-right: 50px"
+        ),
+        width = 6
+      ),
+      box(
+        title = "New cases",
+        plotlyOutput("case_evolution_new"),
+        column(
+          uiOutput("selectize_casesByCountries_new"),
+          width = 3,
+        ),
+        column(
+          HTML(enc2utf8("注意：现存患者仅是估计（现存患者=确诊数-死亡数-治愈数）")),
+          width = 7
+        ),
+        width = 6
+      )
+    ),
+    fluidRow(
+      box(
+        title = "Cases per Country",
+        plotlyOutput("case_evolution_byCountry"),
+        fluidRow(
+          column(
+            uiOutput("selectize_casesByCountries"),
+            width = 3,
+          ),
+          column(
+            checkboxInput("checkbox_logCaseEvolutionCountry", label = "Logarithmic Y-Axis", value = FALSE),
+            checkboxInput("checkbox_per100kEvolutionCountry", label = "Per Population", value = FALSE),
+            width = 3,
+            style = "float: right; padding: 10px; margin-right: 50px"
+          )
+        ),
+        width = 6
+      ),
+      box(
+        title = "Evolution of Cases since 10th/100th case",
+        plotlyOutput("case_evolution_after100"),
+        fluidRow(
+          column(
+            uiOutput("selectize_casesByCountriesAfter100th"),
+            width = 3,
+          ),
+          column(
+            uiOutput("selectize_casesSince100th"),
+            width = 3
+          ),
+          column(
+            checkboxInput("checkbox_logCaseEvolution100th", label = "Logarithmic Y-Axis", value = FALSE),
+            checkboxInput("checkbox_per100kEvolutionCountry100th", label = "Per Population", value = FALSE),
+            width = 3,
+            style = "float: right; padding: 10px; margin-right: 50px"
+          )
+        ),
+        width = 6
+      )
+    )
+  )
+})
